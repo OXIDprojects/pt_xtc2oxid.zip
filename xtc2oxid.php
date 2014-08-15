@@ -112,7 +112,7 @@ printLine("Done.\n");
 //--- CUSTOMERS ------------------------------------------------------
 printLine("IMPORTING CUSTOMERS");
 printLine("Here we get collation errors unicode vs general_ci");
-$oIHandler->importCustomers();
+//$oIHandler->importCustomers();
 printLine("Done.\n");
 //------------------------------------------------------------------------
 
