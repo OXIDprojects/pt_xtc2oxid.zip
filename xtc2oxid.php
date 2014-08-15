@@ -69,6 +69,8 @@ $iStartTime = time();
 require_once("_config.inc.php");
 require_once("_functions.inc.php");
 
+require_once dirname(__FILE__) . "/../bootstrap.php"; 
+
 //IMPLEMENTATION
 set_time_limit(0);
 
@@ -81,23 +83,10 @@ global $sOxidConfigDir;
 //init OXID framework
 @include_once($sOxidConfigDir . "_version_define.php");
 require_once($sOxidConfigDir. "core/oxfunctions.php");
-require_once($sOxidConfigDir. "core/adodblite/adodb.inc.php");
+//require_once($sOxidConfigDir. "core/adodblite/adodb.inc.php");
 
-//Avenger 
-//Make sure user is logged in as admin!!!
-$myConfig = oxConfig::getInstance();
-$user=oxSession::getVar('usr');
-/*
-if (!$user)
-{
-  //If not logged in as user, try admin login
-  $user=oxSession::getVar('blIsAdmin');
-}
-*/
-if (strpos($user,'admin')===false)
-{
-  die('You have to be logged in as an administrator in the shop front-end in order to use the importer!');
-}
+$myConfig = oxRegistry::getConfig();  
+
 //default OXID shop id
 $sShopId = $myConfig->getBaseShopId();
 //Avenger 
@@ -122,9 +111,12 @@ printLine("Done.\n");
 
 //--- CUSTOMERS ------------------------------------------------------
 printLine("IMPORTING CUSTOMERS");
+printLine("Here we get collation errors unicode vs general_ci");
 $oIHandler->importCustomers();
 printLine("Done.\n");
 //------------------------------------------------------------------------
+
+exit(1);
 
 //--- MANUFACTURERS ------------------------------------------------------
 printLine("IMPORTING MANUFACTURERS");
