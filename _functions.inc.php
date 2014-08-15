@@ -301,7 +301,7 @@ class ImportHandler
         $sQ = $delete_from."oxmanufacturers".$where_oxshopid;
         $oxDB->Execute($sQ);
     
-        $sQ=$delete_from."oxuser".$where_oxshopid."' and oxid<>'oxdefaultadmin'";
+        $sQ=$delete_from."oxuser".$where_oxshopid." and oxid != 'oxdefaultadmin'";
         $oxDB->Execute($sQ);
         
         $sQ=$delete_from."oxnewssubscribed where oxuserid<>'oxdefaultadmin'";
