@@ -214,7 +214,7 @@ class ImportHandler
             $this->_sInclField    = ', oxshopincl';
             $this->_sInclFieldVal = ', 1';
         }
-        $oxDB=oxDb::getDb(true);
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
         $sQ = "SELECT * FROM $sOcmDb.products limit 1";
         $oxDB->Execute($sQ);
 
@@ -287,7 +287,7 @@ class ImportHandler
     {
         $delete_from='delete from ';
         $where_oxshopid=" where oxshopid = '".$this->_sShopId."'";
-        $oxDB=oxDb::getDb(true);
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
 
         $sQ = $delete_from."oxcategories".$where_oxshopid;
         $oxDB->Execute($sQ);
@@ -301,7 +301,7 @@ class ImportHandler
         $sQ = $delete_from."oxmanufacturers".$where_oxshopid;
         $oxDB->Execute($sQ);
     
-        $sQ=$delete_from."oxuser".$where_oxshopid."' and oxid<>'oxdefaultadmin'";
+        $sQ=$delete_from."oxuser".$where_oxshopid." and oxid != 'oxdefaultadmin'";
         $oxDB->Execute($sQ);
         
         $sQ=$delete_from."oxnewssubscribed where oxuserid<>'oxdefaultadmin'";
@@ -326,7 +326,7 @@ class ImportHandler
     {
         $sOcmDb = $this->_sOcmDb;
         $sQ = "SELECT * FROM $sOcmDb.languages";
-        $rs = oxDb::getDb(true)->Execute($sQ);
+        $rs = oxDb::getDb( oxDb::FETCH_MODE_ASSOC )->Execute($sQ);
         $aLanguages = array();
         $aLangParams = array();
         $i = 0;
@@ -339,8 +339,46 @@ class ImportHandler
             $aConfLangs[$sCode] = array('active'=>1, 'sort' => $sSort, 'baseId'=>$i++,'language_id'=>$iId);
             $rs->moveNext();
         }
-        oxConfig::getInstance()->saveShopConfVar('aarr', 'aLanguages', serialize($aLanguages));
-        oxConfig::getInstance()->saveShopConfVar('aarr', 'aLanguageParams', serialize($aConfLangs));
+
+        $oDbMeta = oxNew( "oxDbMetaDataHandler" );
+
+        //count language columns based on oxarticles
+        $sTable = $sTableSet = "oxarticles";
+        $sField = $sFieldSet = "oxtitle";
+        $iLang  = 0;
+        while ($oDbMeta->tableExists($sTableSet) && $oDbMeta->fieldExists($sFieldSet, $sTableSet)) {
+            $iLang ++;
+            $sTableSet = getLangTableName($sTable, $iLang);
+            $sFieldSet = $sField.'_'.$iLang;
+        }
+
+        $numberOfAlreadyExistingColumns = $iLang;
+        $numberOfLanguages = $i;
+
+        $languagesToAdd = $numberOfLanguages - $numberOfAlreadyExistingColumns;
+
+        //add new columns
+        if($languagesToAdd > 0) {
+
+          for($i=0; $i <= $languagesToAdd; $i++) {
+            //creating new multilanguage fields with new id over whole DB
+            oxDb::getDb()->startTransaction();
+
+            try {
+                 $oDbMeta->addNewLangToDb();
+            } catch( Exception $oEx ) {
+                 // if exception, rollBack everything
+                 oxDb::getDb()->rollbackTransaction();
+            }
+
+            oxDb::getDb()->commitTransaction();
+          }
+
+        }
+
+        $myConfig = oxRegistry::getConfig();  
+        $myConfig->saveShopConfVar('aarr', 'aLanguages', $aLanguages);
+        $myConfig->saveShopConfVar('aarr', 'aLanguageParams', $aConfLangs);
     }
 
     /**
@@ -354,7 +392,7 @@ class ImportHandler
 
         //insert first language categories
         //Avenger
-        $oxDB=oxDb::getDb(true);
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
         $oRs = $oxDB->Execute("SET SESSION sql_mode=''");  //Reset strict mode
         $sQ = "REPLACE INTO oxcategories 
           (
@@ -445,7 +483,7 @@ class ImportHandler
       $sImported='Imported from '.$sImported.'Commerce';
       $sOcmDb = $this->_sOcmDb;
       $sShopId = $this->_sShopId;
-      $oxDB=oxDb::getDb(true);
+      $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
       $collation=get_table_collation($oxDB,$sOcmDb,'customers');
       if ($collation)
       {
@@ -611,7 +649,7 @@ class ImportHandler
 
         $sQ = "REPLACE INTO oxmanufacturers (oxid, oxshopid, oxactive, oxicon, oxtitle $sTitleFields {$this->_sInclField})
                             (SELECT manufacturers_id, '$sShopId', 1, manufacturers_image, manufacturers_name $sTitleVals {$this->_sInclFieldVal} FROM $sOcmDb.manufacturers)";
-        $oxDB=oxDb::getDb();
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
         $oxDB->Execute($sQ);
         $error=$oxDB->ErrorMsg();
         if ($error)
@@ -677,7 +715,7 @@ class ImportHandler
         WHERE 
         p.products_id = pd.products_id AND 
         language_id = $this->_sXtcLangId)";
-        $oxDB=oxDb::getDb();
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
         $oxDB->Execute($sQ);
         $error=$oxDB->ErrorMsg();
         if ($error)
@@ -718,7 +756,7 @@ class ImportHandler
             $sQ = "
               UPDATE oxarticles AS p, (SELECT pd.products_id AS id, pd.products_name AS t FROM $sOcmDb.products_description AS pd WHERE pd.language_id = $i) AS src 
                 SET p.oxtitle$sLangSuffix = src.t WHERE src.id = p.oxid";
-            oxDb::getDb()->Execute($sQ);
+            oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
 
             //dealing with long descr
             $sQ = "
@@ -752,7 +790,7 @@ class ImportHandler
         $sQ = "INSERT INTO oxobject2category (oxid, oxobjectid, oxcatnid {$this->_sInclField})
                           (SELECT md5(concat(t.products_id, t.categories_id, RAND())), t.products_id, t.categories_id $sInclFieldVal
                                     FROM $sOcmDb.products_to_categories AS t)";
-        oxDb::getDb()->Execute($sQ);
+        oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
     }
 
     /**
@@ -767,7 +805,7 @@ class ImportHandler
                           (SELECT t1.reviews_id, 1,  products_id, 'oxarticle',reviews_text, date_added, languages_id - 1, reviews_rating
                                     FROM $sOcmDb.reviews AS t1, $sOcmDb.reviews_description AS t2 WHERE t1.reviews_id = t2.reviews_id)";
 
-        $oxDB=oxDb::getDb();
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
         $oxDB->Execute($sQ);
         $error=$oxDB->ErrorMsg();
         if ($error)
@@ -785,7 +823,7 @@ class ImportHandler
         $iLangCount = $this->_iLangCount;
         $sOcmDb = $this->_sOcmDb;
         $sShopId = $this->_sShopId;
-        $oxDB=oxDb::getDb(true);  
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);  
         //remove imported variants
         $sQ = "DELETE FROM oxarticles WHERE oxparentid <> '' AND oxparentid IN (SELECT products_id FROM $sOcmDb.products)";
         $oxDB->Execute($sQ);
@@ -945,7 +983,7 @@ class ImportHandler
     {
       $sOscImageDir = $this->_sOscImageDir;
       $sQ = "SELECT oxid, oxicon FROM oxmanufacturers";
-      $rs = oxDb::getDb(true)->Execute($sQ);
+      $rs = oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
       while ($rs && $rs->recordCount()>0 && !$rs->EOF) 
       {
         $sImg = $rs->fields["oxicon"];
@@ -955,7 +993,7 @@ class ImportHandler
             copy($sSrcName, oxConfig::getInstance()->getAbsDynImageDir() . "/icon/". basename($sImg));
         $sImg = basename($sImg);
         $sQ1 = "UPDATE oxmanufacturers SET oxicon = '$sImg' WHERE oxid = '".$rs->fields["oxid"]."'";
-        oxDb::getDb(true)->Execute($sQ1);
+        oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ1);
         $rs->moveNext();
       }
     }
@@ -970,7 +1008,7 @@ class ImportHandler
         $sOcmDb = $this->_sOcmDb;
         $image_dir=oxConfig::getInstance()->getAbsDynImageDir();
         $sQ = "SELECT oxid, oxthumb FROM oxcategories WHERE oxid IN (SELECT categories_id FROM {$sOcmDb}.categories)";
-        $rs = oxDb::getDb(true)->Execute($sQ);
+        $rs = oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         while ($rs && $rs->recordCount()>0 && !$rs->EOF) 
         {
             $sImg = $rs->fields["oxthumb"];
@@ -982,7 +1020,7 @@ class ImportHandler
 
             $sImg = basename($sImg);
             $sQ1 = "UPDATE oxcategories SET oxthumb = '$sImg' WHERE oxid = '".$rs->fields["oxid"]."'";
-            oxDb::getDb(true)->Execute($sQ1);
+            oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ1);
 
             $rs->moveNext();
         }
@@ -999,7 +1037,7 @@ class ImportHandler
         $image_dir=oxConfig::getInstance()->getAbsDynImageDir();
 
         $sQ = "SELECT oxid, oxthumb, oxpic1 FROM oxarticles WHERE oxid in (SELECT products_id FROM $sOcmDb.products)";
-        $rs = oxDb::getDb(true)->Execute($sQ);
+        $rs = oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         while ($rs && $rs->recordCount()>0 && !$rs->EOF) {
           $sImg = $rs->fields["oxthumb"];
             //copy image
@@ -1011,7 +1049,7 @@ class ImportHandler
               }
               $sImg = basename($sImg);
               $sQ1 = "UPDATE oxarticles SET oxthumb = '$sImg', oxpic1 = '$sImg' WHERE oxid = '".$rs->fields["oxid"]."'";
-              oxDb::getDb(true)->Execute($sQ1);
+              oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ1);
           }
           $rs->moveNext();
         }
@@ -1091,10 +1129,10 @@ class XtImportHandler extends ImportHandler
             $sLangSuffix = getLangSuffix($i);
 
             $sQ = "UPDATE oxarticles, (SELECT products_keywords, products_short_description, products_id FROM $sOcmDb.products_description WHERE language_id = $i) AS src SET oxsearchkeys$sLangSuffix = src.products_keywords, oxshortdesc$sLangSuffix = src.products_short_description WHERE  src.products_id = oxid";
-            oxDb::getDb(true)->Execute($sQ);
+            oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
 
             $sQ = "UPDATE oxartextends, (SELECT products_keywords, products_id FROM $sOcmDb.products_description WHERE language_id = $i) AS src SET oxtags$sLangSuffix = src.products_keywords WHERE  src.products_id = oxid";
-            oxDb::getDb(true)->Execute($sQ);
+            oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         }
 
         //import additional images
@@ -1104,7 +1142,7 @@ class XtImportHandler extends ImportHandler
                 $sZoomImg = ", oxzoom$i = src.image_name ";
             $j = $i + 1;
             $sQ = "UPDATE oxarticles, (SELECT image_name, products_id FROM $sOcmDb.products_images WHERE image_nr = $i) AS src SET oxpic$j = src.image_name $sZoomImg WHERE  src.products_id = oxid";
-            oxDb::getDb(true)->Execute($sQ);
+            oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         }
 
         //import scale prices
@@ -1114,7 +1152,7 @@ class XtImportHandler extends ImportHandler
 
         $sQ = "SELECT * FROM $sOcmDb.products_graduated_prices";
         $aScalePrices = array();
-        $rs = oxDb::getDb(true)->Execute($sQ);
+        $rs = oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         while($rs && $rs->recordCount()>0 && !$rs->EOF) {
             $iProduct = $rs->fields["products_id"];
             $iQuantity = $rs->fields["quantity"];
@@ -1131,7 +1169,7 @@ class XtImportHandler extends ImportHandler
                 if ($iQFrom && $iQTo) {
                     $sQ = "INSERT INTO oxprice2article (oxid,                oxshopid,   oxartid, oxaddabs,   oxamount, oxamountto) VALUES
                                 (md5(concat('$iProduct', $iQFrom, RAND())), '$sShopId','$iProduct', $dNewPrice, $iQFrom, $iQTo)";
-                    oxDb::getDb(true)->Execute($sQ);
+                    oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
                 }
                 $dNewPrice = $dPrice;
                 $iQFrom = $iQuantity;
@@ -1140,7 +1178,7 @@ class XtImportHandler extends ImportHandler
             $iQTo = 99999999;
             $sQ = "INSERT INTO oxprice2article (oxid,                oxshopid,   oxartid, oxaddabs,   oxamount, oxamountto) VALUES
                                 (md5(concat('$iProduct', $iQFrom, RAND())), '$sShopId','$iProduct', $dNewPrice, $iQFrom, $iQTo)";
-            oxDb::getDb(true)->Execute($sQ);
+            oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         }
 
 
@@ -1148,7 +1186,7 @@ class XtImportHandler extends ImportHandler
         $sQ = "REPLACE INTO oxobject2article (oxid, oxobjectid, oxarticlenid, oxsort)
                                         (SELECT ID, xsell_id, products_id, sort_order
                                            FROM $sOcmDb.products_xsell)";
-        oxDb::getDb(true)->Execute($sQ);
+        oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
 
     }
 
@@ -1170,7 +1208,7 @@ class XtImportHandler extends ImportHandler
             $sQ = "
               UPDATE oxcategories, (SELECT categories_id, categories_heading_title, categories_description FROM $sOcmDb.categories_description WHERE language_id = $i) AS src S
                 ET oxlongdesc$sLangSuffix = src.categories_description, oxdesc$sLangSuffix = src.categories_heading_title WHERE  src.categories_id = oxid";
-            oxDb::getDb(true)->Execute($sQ);
+            oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         }
     }
 
@@ -1179,7 +1217,7 @@ class XtImportHandler extends ImportHandler
       $sOcmDb = $this->_sOcmDb;
       $iLangCount = $this->_iLangCount;
       $sShopId = $this->_sShopId;
-      $oxDB=oxDb::getDb(true);
+      $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
       //Import order data
       $sQ = "
       REPLACE INTO oxorder (
@@ -1635,7 +1673,7 @@ class XtImportHandler extends ImportHandler
         $image_dir=oxConfig::getInstance()->getAbsDynImageDir();
         //take all imported products
         $sQ = "SELECT oxid, oxthumb, $sPics FROM oxarticles WHERE oxid in (SELECT products_id FROM $sOcmDb.products)";
-        $rs = oxDb::getDb(true)->Execute($sQ);
+        $rs = oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ);
         while ($rs && $rs->recordCount()>0 && !$rs->EOF) {
             $sImg = $rs->fields["oxthumb"];
             //copy images
@@ -1647,7 +1685,7 @@ class XtImportHandler extends ImportHandler
 
                 $sImg = basename($sImg);
                 $sQ1 = "UPDATE oxarticles SET oxthumb = '$sImg' WHERE oxid = '".$rs->fields["oxid"]."'";
-                oxDb::getDb(true)->Execute($sQ1);
+                oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ1);
             }
 
             for($i = 1; $i < $this->_iMaxImages; $i++) {
@@ -1679,7 +1717,7 @@ class XtImportHandler extends ImportHandler
                     if ($i <= 4)
                         $sZoomUpdate = ", oxzoom$i = '$sImg' ";
                     $sQ1 = "UPDATE oxarticles SET oxpic$i = '$sImg' $sZoomUpdate WHERE oxid = '".$rs->fields["oxid"]."'";
-                    oxDb::getDb(true)->Execute($sQ1);
+                    oxDb::getDb(oxDb::FETCH_MODE_ASSOC)->Execute($sQ1);
                 }
             }
 
@@ -1717,7 +1755,7 @@ class XtImportHandler extends ImportHandler
           WHERE 
           mail_id NOT IN (SELECT oxid FROM oxnewssubscribed)
           )";
-        $oxDB=oxDb::getDb();
+        $oxDB=oxDb::getDb(oxDb::FETCH_MODE_ASSOC);
         $oxDB->Execute($sQ);
         $error=$oxDB->ErrorMsg();
         if ($error)
